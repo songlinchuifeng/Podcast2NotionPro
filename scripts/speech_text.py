@@ -234,15 +234,17 @@ def insert_mindmap(mindmap):
         mindmap_page_id = create_mindmap(title, episode.get("icon"))
         start_time = time.time()
         print(f"开始插入思维导图")
+        with open('mindmap.json', 'w', encoding='utf-8') as f:
+            json.dump(mindmap, f, ensure_ascii=False, indent=4)
         mindmap_root_id = (
             notion_helper.append_blocks(
                 block_id=mindmap_page_id,
-                children=[utils.get_bulleted_list_item(mindmap.get("content"))],
+                children=[utils.get_heading(1,mindmap.get("content"))],
             )
             .get("results")[0]
             .get("id")
         )
-        insert_mindmap_to_notion(mindmap_root_id, mindmap.get("children"))
+        insert_mindmap_to_notion(mindmap_page_id,mindmap_root_id, mindmap.get("children"),2)
         update_mindmap(mindmap_page_id)
         end = time.time()
         print(f"插入思维导图结束 {end-start_time}")
@@ -252,16 +254,16 @@ def insert_mindmap(mindmap):
     return mindmap_page_id
 
 
-def insert_mindmap_to_notion(block_id, children):
+def insert_mindmap_to_notion(page_id,block_id, children,level):
     """将思维导图插入Notion中"""
-    blocks = [utils.get_bulleted_list_item(block.get("content")) for block in children]
-    results = notion_helper.append_blocks(
-        block_id=block_id,
-        children=blocks,
-    ).get("results")
+    blocks = [ utils.get_heading(level,block.get("content")) if(level < 4) else utils.get_bulleted_list_item(block.get("content"))for block in children]
+    if(level < 5):
+        results = notion_helper.append_blocks_after(block_id=page_id,after=block_id,children=blocks).get("results")
+    else:
+        results = notion_helper.append_blocks(block_id=block_id,children=blocks).get("results")
     for index, child in enumerate(children):
         if child.get("children"):
-            insert_mindmap_to_notion(results[index].get("id"), child.get("children"))
+            insert_mindmap_to_notion(page_id,results[index].get("id"), child.get("children"),level+1)
 
 
 def check_mindmap(title):
@@ -407,7 +409,7 @@ def start(dir_id, files):
 
 def is_match(title, l):
     for i in l:
-        if similarity(title, i) > 0.9:
+        if similarity(title, i) > 0.5:
             return True
 
 
@@ -499,6 +501,12 @@ def get_record(title, records):
         if similarity(title, key) > 0.9:
             return value
 
+def get_rss_urls(pids):
+    result = {}
+    r = requests.post("https://api.malinkang.com/api/xyz/rss", json=pids)
+    if r.ok:
+        result = r.json()
+    return result
 
 if __name__ == "__main__":
     notion_helper = NotionHelper()
@@ -509,20 +517,28 @@ if __name__ == "__main__":
             {"property": "Podcast", "relation": {"is_not_empty": True}},
         ]
     }
+    sorts = [
+        {"property": "日期", "direction": "descending"}
+    ]
     episodes = notion_helper.query_all_by_filter(
-        notion_helper.episode_database_id, filter=f
+        notion_helper.episode_database_id, filter=f, sorts=sorts
     )
     podcasts = {}
+    pids = []
     for episode in episodes:
         episode_properties = episode.get("properties")
         podcast = utils.get_property_value(episode_properties.get("Podcast"))
         podcast_properties = get_podcast(podcast)
         podcast_title = utils.get_property_value(podcast_properties.get("播客"))
-        rss = utils.get_property_value(podcast_properties.get("rss"))
+        pid = utils.get_property_value(podcast_properties.get("Pid"))
         if podcast_title not in podcasts:
-            podcasts[podcast_title] = {"rss": rss, "episodes": []}
+            podcasts[podcast_title] = {"id":pid, "episodes": []}
+            pids.append({"id":pid,"title":podcast_title})
         podcasts[podcast_title].get("episodes").append(episode)
-    print(f"获取播客成功：{len(episodes)}")
+    rss = get_rss_urls(pids)
+    for key,value in podcasts.items():
+        pid = value.get("id")
+        value.update({"rss":rss.get(pid)})
     all_dirs = get_dir()
     for key, value in podcasts.items():
         dir_id = get_dir_id_by_name(key)

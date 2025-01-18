@@ -147,20 +147,11 @@ def merge_podcast(list1, list2):
     return results
 
 
-def get_rss_urls(pids):
-    result = {}
-    r = requests.post("https://api.malinkang.com/api/xyz/rss2", json=pids)
-    if r.ok:
-        result = r.json()
-    return result
-
 
 def insert_podcast():
     list1 = get_mileage()
     list2 = get_podcast()
     results = merge_podcast(list1, list2)
-    pids = [{"id":x.get("pid"),"title":x.get("title")} for x in results]
-    rss = get_rss_urls(pids)
     notion_podcasts = notion_helper.get_all_podcast()
     dict = {}
     for index, result in enumerate(results):
@@ -169,7 +160,6 @@ def insert_podcast():
         podcast["Brief"] = result.get("brief")
         pid = result.get("pid")
         podcast["Pid"] = pid
-        podcast["rss"] = rss.get(result.get("pid"))
         podcast["收听时长"] = result.get("playedSeconds", 0)
         podcast["Description"] = result.get("description")
         podcast["链接"] = f"https://www.xiaoyuzhoufm.com/podcast/{result.get('pid')}"
@@ -190,7 +180,6 @@ def insert_podcast():
             if (
                 old_podcast.get("最后更新时间") == podcast.get("最后更新时间")
                 and old_podcast.get("收听时长") == podcast.get("收听时长")
-                and (old_podcast.get("rss") or podcast.get("rss"))
             ):
                 continue
         print(
@@ -260,6 +249,8 @@ def get_month_from_notion():
 def update_month_data():
     for result in get_month_from_notion().get("results"):
         title = utils.get_property_value(result.get("properties").get("标题"))
+        if not title:
+            continue
         id = result.get("id")
         year = int(title[0:4])
         month = int(title[5 : title.index("月")])
